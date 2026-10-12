@@ -2,6 +2,15 @@ name: Build OpenWRT for AX6-NSS
 
 on:
   workflow_dispatch:
+  # 改了构建配置就自动编译，省得每次手动点 Run workflow
+  push:
+    paths:
+      - 'AX6-IPQ/**'
+      - '.github/workflows/build-AX6-NSS.yml'
+
+# 发 Release 需要写权限（fork 的默认可能只有只读）
+permissions:
+  contents: write
 
 env:
   REPO_URL: https://github.com/VIKINGYFY/immortalwrt.git
@@ -177,13 +186,13 @@ jobs:
           > 首次使用建议 **清空配置全新刷写**（stock 大分区机型）。
 
           ### 预装插件
-          - PassWall（Xray + Sing-box）
+          - PassWall（Xray + Sing-box + NaiveProxy）
+          - SmartDNS（+ 中文界面）
+          - Tailscale（tailscaled + LuCI 面板，登录用你自己的账号）
           - DDNS-Go
           - Socat
           - UPnP
           - KMS
-          - EasyTier
-          - ZeroTier
           - WireGuard
           - frpc
 
