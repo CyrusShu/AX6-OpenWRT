@@ -96,15 +96,37 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        sudo -E apt-get -qq update -y
+        echo "================ 磁盘现状（apt 之前）================"
+        df -hT
+
+        # 上一次构建正是死在这里：apt 写索引时根分区满（ENOSPC）。
+        # 先清掉 apt 自己的索引/缓存腾地方，并给 update 加重试。
+        sudo rm -rf /var/lib/apt/lists/*
+        sudo apt-get clean
+        sudo -E apt-get -qq update -y -o Acquire::Retries=3 || echo "::warning::apt update 失败，继续尝试安装"
+
+        # 装不上也不要立刻死：GitHub 镜像本身已带大部分工具链，
+        # 先检查关键命令在不在，缺了才报错。
         sudo -E apt-get -qq install -y \
           build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
           gettext git libncurses-dev libssl-dev python3 python3-distutils-extra \
-          python3-setuptools rsync swig unzip zlib1g-dev file wget patch subversion
-        sudo -E apt-get -qq autoremove --purge
-        sudo -E apt-get -qq clean
+          python3-setuptools rsync swig unzip zlib1g-dev file wget patch subversion || {
+            echo "::warning::apt 安装失败（多半是磁盘空间），改为核对工具链是否已就绪"
+            missing=0
+            for t in gcc g++ make flex bison gettext rsync swig unzip file patch wget git python3; do
+              command -v "$t" >/dev/null 2>&1 || { echo "::error::缺少必需命令: $t"; missing=1; }
+            done
+            if [ "$missing" != "0" ]; then exit 1; fi
+            echo "工具链已齐全，继续构建"
+          }
+
+        sudo -E apt-get -qq autoremove --purge || true
+        sudo -E apt-get -qq clean || true
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
+
+        echo "================ 磁盘现状（apt 之后）================"
+        df -hT
 
     - name: Clone source code
       working-directory: ./
