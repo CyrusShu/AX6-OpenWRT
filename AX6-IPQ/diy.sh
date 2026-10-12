@@ -81,3 +81,46 @@ chmod +x "$DIY_DIR/frp/patch_enable.sh"
 
 #修改主机名
 #sed -i "s/hostname='ImmortalWrt'/hostname='Redmi-AX6'/g" package/base-files/files/bin/config_generate
+
+# ================================================================
+# 自定义增删包（本脚本运行时 cwd = openwrt/，.config 已就位、make defconfig 之前）
+#   追加：naiveproxy / Tailscale / SmartDNS
+#   去掉：ZeroTier / EasyTier（组网工具只留 Tailscale 一个）
+# ================================================================
+add_pkg() {
+  if grep -q "^# CONFIG_PACKAGE_$1 is not set$" .config; then
+    # -i.bak 再删，GNU sed（CI 的 ubuntu）和 BSD sed（macOS）都能跑
+    sed -i.bak "s|^# CONFIG_PACKAGE_$1 is not set$|CONFIG_PACKAGE_$1=y|" .config && rm -f .config.bak
+  else
+    echo "CONFIG_PACKAGE_$1=y" >> .config
+  fi
+}
+del_pkg() {
+  sed -i.bak "s|^CONFIG_PACKAGE_$1=y$|# CONFIG_PACKAGE_$1 is not set|" .config && rm -f .config.bak
+}
+
+# ---------- 要的 ----------
+add_pkg naiveproxy                          # PassWall 的 naive 节点
+add_pkg tailscale                           # Tailscale 客户端
+add_pkg luci-app-tailscale-community        # 它的 LuCI 面板
+add_pkg smartdns                            # SmartDNS 核心
+add_pkg luci-app-smartdns                   # SmartDNS LuCI
+add_pkg luci-i18n-smartdns-zh-cn            # 中文界面
+add_pkg luci-i18n-tailscale-community-zh-cn
+
+# ---------- 不要的 ----------
+del_pkg zerotier
+del_pkg luci-app-zerotier
+del_pkg luci-i18n-zerotier-zh-cn
+
+del_pkg easytier-noweb                      # 二进制包名是 easytier-noweb，不是 easytier
+del_pkg luci-app-easytier
+del_pkg luci-i18n-easytier-zh-cn
+
+# ---------- 可选：还想省空间就取消注释 ----------
+# del_pkg frpc
+# del_pkg luci-app-frpc
+# del_pkg vlmcsd
+# del_pkg luci-app-vlmcsd
+# del_pkg luci-app-autoreboot
+# del_pkg luci-app-ramfree
