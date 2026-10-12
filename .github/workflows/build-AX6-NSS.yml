@@ -167,7 +167,55 @@ jobs:
         mkdir upload
         cp openwrt/bin/targets/*/*/*.ubi upload/
         cp openwrt/bin/targets/*/*/*.bin upload/
-        
+
+    # ── 构建自查：把"包到底进没进"写成文件一起发到 Release ──────────────
+    # 目的：make defconfig 会静默丢弃无效符号，光看绿灯不算数。
+    # 报告会作为 Release 资产公开，无需读 Actions 日志即可核对。
+    - name: Build verification report
+      run: |
+        set -u
+        mkdir -p upload
+        MANIFEST="$(ls openwrt/bin/targets/*/*/*.manifest 2>/dev/null | head -1 || true)"
+        if [ -z "$MANIFEST" ]; then
+          echo "::error::找不到 manifest，无法自查"
+          echo "VERIFY_OK=0" >> "$GITHUB_ENV"
+          exit 0
+        fi
+        cp "$MANIFEST" upload/00-packages.manifest
+        cp openwrt/.config upload/00-dot-config.txt
+
+        MUST_HAVE="luci-app-passwall xray-core sing-box chinadns-ng naiveproxy tailscale luci-app-tailscale-community smartdns luci-app-smartdns"
+        MUST_NOT="zerotier luci-app-zerotier easytier-noweb luci-app-easytier"
+        NICE="luci-i18n-smartdns-zh-cn luci-i18n-tailscale-community-zh-cn luci-i18n-passwall-zh-cn"
+
+        BAD=0
+        {
+          echo "# 构建自查报告"
+          echo
+          echo "生成时间: $(date '+%F %T %Z')"
+          echo "commit:   $GITHUB_SHA"
+          echo "manifest: $MANIFEST"
+          echo
+          echo "## 本次改动关心的包（依据 manifest，即固件里真正装了什么）"
+          printf '%-42s %s\n' "包名" "状态"
+          for p in $MUST_HAVE $MUST_NOT $NICE; do
+            if grep -qE "^${p} " "$MANIFEST"; then st="[有]"; else st="[无]"; fi
+            printf '%-42s %s\n' "$p" "$st"
+          done
+          echo
+          echo "## 判定"
+          for p in $MUST_HAVE; do
+            grep -qE "^${p} " "$MANIFEST" || { echo "  ✗ 缺少必装: $p"; BAD=1; }
+          done
+          for p in $MUST_NOT; do
+            grep -qE "^${p} " "$MANIFEST" && { echo "  ✗ 应删未删: $p"; BAD=1; }
+          done
+          [ "$BAD" = "0" ] && echo "  ✓ 通过：必装的都在，该删的都不在"
+        } > upload/00-BUILD-VERIFY.txt
+
+        cat upload/00-BUILD-VERIFY.txt
+        if [ "$BAD" = "0" ]; then echo "VERIFY_OK=1" >> "$GITHUB_ENV"; else echo "VERIFY_OK=0" >> "$GITHUB_ENV"; fi
+
     - name: Get Current Date
       run: echo "CURRENT_DATE=$(date '+%Y%m%d%H%M%S')" >> $GITHUB_ENV
       
@@ -216,3 +264,11 @@ jobs:
       with:
         keep_latest: 10
         delete_tags : true
+
+    # Release 先发出去（自查报告在里面，可公开核对），再用这步把状态标红。
+    # 这样"缺包/该删没删"既能留下证据，又不会被误当成成功。
+    - name: Fail the run if self-check did not pass
+      if: env.VERIFY_OK != '1'
+      run: |
+        echo "::error::自查未通过 —— 请查看 Release 里的 00-BUILD-VERIFY.txt"
+        exit 1
